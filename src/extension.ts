@@ -12,14 +12,20 @@ function generateId(): string {
 }
 
 async function askParticipantId(context: vscode.ExtensionContext): Promise<string> {
+  const stored = context.globalState.get<string>('participantId') ?? '';
   const input = await vscode.window.showInputBox({
     title: 'AI Code Research Tracker — Participant ID',
     prompt: 'Enter your participant ID (provided by the researcher)',
     placeHolder: 'e.g. P01',
+    value: stored,
     ignoreFocusOut: true,
     validateInput: v => (v.trim().length === 0 ? 'Participant ID cannot be empty' : null)
   });
-  const id = (input ?? '').trim() || 'unknown';
+  if (input === undefined) {
+    // User cancelled — keep the stored value (or 'unknown' if none set yet)
+    return stored || 'unknown';
+  }
+  const id = input.trim() || 'unknown';
   await context.globalState.update('participantId', id);
   return id;
 }
