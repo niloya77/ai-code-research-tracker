@@ -41,10 +41,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const saved = dataStore.load().filter(r => !r.pendingConfirmation);
   tracker.loadAll(saved);
 
-  participantId = context.globalState.get<string>('participantId') ?? null;
-  if (!participantId || participantId === 'unknown') {
-    participantId = await askParticipantId(context);
-  }
+  participantId = await askParticipantId(context);
 
   statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
   statusBarItem.command = 'aiTracker.acceptCode';
