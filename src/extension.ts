@@ -11,6 +11,19 @@ function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
+async function askParticipantId(context: vscode.ExtensionContext): Promise<string> {
+  const input = await vscode.window.showInputBox({
+    title: 'AI Code Research Tracker — Participant ID',
+    prompt: 'Enter your participant ID (provided by the researcher)',
+    placeHolder: 'e.g. P01',
+    ignoreFocusOut: true,
+    validateInput: v => (v.trim().length === 0 ? 'Participant ID cannot be empty' : null)
+  });
+  const id = (input ?? '').trim() || 'unknown';
+  await context.globalState.update('participantId', id);
+  return id;
+}
+
 let tracker: BlockTracker;
 let dataStore: DataStore;
 let supabase: SupabaseClient;
@@ -29,16 +42,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   tracker.loadAll(saved);
 
   participantId = context.globalState.get<string>('participantId') ?? null;
-  if (!participantId) {
-    const input = await vscode.window.showInputBox({
-      title: 'AI Code Research Tracker — Setup',
-      prompt: 'Enter your participant ID (provided by the researcher)',
-      placeHolder: 'e.g. P01',
-      ignoreFocusOut: true,
-      validateInput: v => (v.trim().length === 0 ? 'Participant ID cannot be empty' : null)
-    });
-    participantId = (input ?? 'unknown').trim();
-    await context.globalState.update('participantId', participantId);
+  if (!participantId || participantId === 'unknown') {
+    participantId = await askParticipantId(context);
   }
 
   statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
@@ -48,7 +53,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(
     vscode.commands.registerCommand('aiTracker.acceptCode', handleAccept),
     vscode.commands.registerCommand('aiTracker.viewStats', showStats),
-    vscode.commands.registerCommand('aiTracker.exportCSV', exportCSV)
+    vscode.commands.registerCommand('aiTracker.exportCSV', exportCSV),
+    vscode.commands.registerCommand('aiTracker.setParticipantId', async () => {
+      participantId = await askParticipantId(context);
+      vscode.window.showInformationMessage(`[AI Tracker] Participant ID set to: ${participantId}`);
+    })
   );
 
   context.subscriptions.push(

@@ -42,6 +42,10 @@
       {
         "command": "aiTracker.exportCSV",
         "title": "AI Tracker: Export Data as CSV"
+      },
+      {
+        "command": "aiTracker.setParticipantId",
+        "title": "AI Tracker: Set Participant ID"
       }
     ]
   },
