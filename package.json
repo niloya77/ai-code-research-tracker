@@ -1,0 +1,59 @@
+{
+  "name": "ai-code-research-tracker",
+  "displayName": "AI Code Research Tracker",
+  "description": "Tracks AI-generated code acceptance behavior for research studies",
+  "version": "0.1.0",
+  "publisher": "research",
+  "engines": {
+    "vscode": "^1.74.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "AI Code Research Tracker",
+      "properties": {
+        "aiTracker.supabaseUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Supabase project URL (e.g. https://xxx.supabase.co)"
+        },
+        "aiTracker.supabaseKey": {
+          "type": "string",
+          "default": "",
+          "description": "Supabase anon public key"
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "aiTracker.acceptCode",
+        "title": "AI Tracker: Accept AI Code Block"
+      },
+      {
+        "command": "aiTracker.viewStats",
+        "title": "AI Tracker: View Statistics"
+      },
+      {
+        "command": "aiTracker.exportCSV",
+        "title": "AI Tracker: Export Data as CSV"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^18.0.0",
+    "@types/vscode": "^1.74.0",
+    "@vscode/vsce": "^3.9.1",
+    "typescript": "^5.3.0"
+  }
+}
