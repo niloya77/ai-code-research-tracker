@@ -85,6 +85,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           condition: null,
           acceptanceTimestamp: null,
           observationWindowEndTimestamp: null,
+          selfReportedConfidence: null,
+          blockDeleted: false,
+          blockDeletionTimestamp: null,
           postAcceptance: {
             editSessions: [],
             changedAbsoluteLines: [],
@@ -104,10 +107,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         });
       }
 
-      tracker.handleDocumentChange(event, record => {
-        scheduleSave();
-        syncToSupabase(record);
-      });
+      tracker.handleDocumentChange(
+        event,
+        record => { scheduleSave(); syncToSupabase(record); },
+        record => { scheduleSave(); syncToSupabase(record); }
+      );
     })
   );
 
@@ -124,6 +128,11 @@ async function promptUser(id: string, lineCount: number): Promise<void> {
   );
 
   if (aiAnswer !== 'Yes, AI-generated') {
+    const record = tracker.get(id);
+    if (record) {
+      record.condition = 'rejected';
+      syncToSupabase(record);
+    }
     tracker.remove(id);
     pendingRecordId = null;
     return;
@@ -148,13 +157,13 @@ async function promptUser(id: string, lineCount: number): Promise<void> {
     startReviewTimer(id);
     statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
   } else {
-    // Immediate condition — accept right away
     record.wantsToModify = false;
     record.condition = 'immediate';
     record.reviewDurationMs = 0;
     statusBarItem.backgroundColor = undefined;
-    vscode.window.showInformationMessage('[AI Tracker] Accepted (Immediate).');
     tracker.accept(id);
+    record.selfReportedConfidence = await askConfidence();
+    vscode.window.showInformationMessage('[AI Tracker] Accepted.');
     syncToSupabase(record);
     pendingRecordId = null;
     statusBarItem.hide();
@@ -164,6 +173,15 @@ async function promptUser(id: string, lineCount: number): Promise<void> {
 
   statusBarItem.show();
   scheduleSave();
+}
+
+async function askConfidence(): Promise<number | null> {
+  const answer = await vscode.window.showInformationMessage(
+    'How much do you trust this AI code? (1 = not at all, 5 = completely)',
+    { modal: true },
+    '1', '2', '3', '4', '5'
+  );
+  return answer ? parseInt(answer) : null;
 }
 
 function startReviewTimer(id: string): void {
@@ -206,13 +224,8 @@ async function handleAccept(): Promise<void> {
 
   const updated = tracker.get(pendingRecordId);
   if (updated) {
-    const label = updated.condition === 'reviewed' ? 'Reviewed' : 'Immediate';
-    const duration = updated.reviewDurationMs
-      ? ` (review time: ${Math.round(updated.reviewDurationMs / 1000)}s)`
-      : '';
-    vscode.window.showInformationMessage(
-      `[AI Tracker] Accepted (${label})${duration}. Tracking modifications for 7 days.`
-    );
+    updated.selfReportedConfidence = await askConfidence();
+    vscode.window.showInformationMessage('[AI Tracker] Accepted. Tracking modifications for 7 days.');
     syncToSupabase(updated);
   }
 
@@ -243,8 +256,8 @@ function showStats(): void {
     `Total accepted blocks: ${all.length}`,
     `  Reviewed: ${reviewed.length}   Immediate: ${immediate.length}`,
     ``,
-    `Avg review duration (ms):`,
-    `  Reviewed:  ${avg(reviewed, r => r.reviewDurationMs ?? 0)}`,
+    `Avg review duration (s):`,
+    `  Reviewed:  ${avg(reviewed, r => (r.reviewDurationMs ?? 0) / 1000)}`,
     ``,
     `Proportion lines changed (avg):`,
     `  Reviewed:  ${avg(reviewed, r => r.postAcceptance.proportionLinesChanged)}`,
@@ -254,9 +267,9 @@ function showStats(): void {
     `  Reviewed:  ${avg(reviewed, r => r.postAcceptance.changeFrequency)}`,
     `  Immediate: ${avg(immediate, r => r.postAcceptance.changeFrequency)}`,
     ``,
-    `Active modification time ms (avg):`,
-    `  Reviewed:  ${avg(reviewed, r => r.postAcceptance.totalActiveModificationTimeMs)}`,
-    `  Immediate: ${avg(immediate, r => r.postAcceptance.totalActiveModificationTimeMs)}`
+    `Active modification time (s, avg):`,
+    `  Reviewed:  ${avg(reviewed, r => r.postAcceptance.totalActiveModificationTimeMs / 1000)}`,
+    `  Immediate: ${avg(immediate, r => r.postAcceptance.totalActiveModificationTimeMs / 1000)}`
   ].join('\n');
 
   vscode.window.showInformationMessage(lines, { modal: true });

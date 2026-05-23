@@ -14,9 +14,12 @@ export interface InsertionRecord {
   wantsToModify: boolean | null;
   reviewStartTimestamp: number | null;
   reviewDurationMs: number | null;
-  condition: 'reviewed' | 'immediate' | null;
+  condition: 'reviewed' | 'immediate' | 'rejected' | null;
   acceptanceTimestamp: number | null;
   observationWindowEndTimestamp: number | null;
+  selfReportedConfidence: number | null;
+  blockDeleted: boolean;
+  blockDeletionTimestamp: number | null;
   postAcceptance: PostAcceptanceData;
 }
 

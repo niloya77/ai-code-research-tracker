@@ -39,14 +39,17 @@ export class DataStore {
       'original_line_count',
       'condition',
       'acceptance_timestamp',
-      'time_to_accept_ms',
+      'time_to_accept_s',
       'edited_before_acceptance',
       'total_lines_changed',
       'proportion_lines_changed',
       'change_frequency',
-      'total_active_modification_time_ms',
-      'time_to_first_modification_ms',
-      'review_duration_ms'
+      'total_active_modification_time_s',
+      'time_to_first_modification_s',
+      'review_duration_s',
+      'self_reported_confidence',
+      'block_deleted',
+      'block_deletion_timestamp_s'
     ].join(',');
 
     const rows = records
@@ -59,14 +62,17 @@ export class DataStore {
           r.originalLineCount,
           r.condition ?? '',
           r.acceptanceTimestamp ?? '',
-          r.acceptanceTimestamp ? r.acceptanceTimestamp - r.insertionTimestamp : '',
+          r.acceptanceTimestamp ? ((r.acceptanceTimestamp - r.insertionTimestamp) / 1000).toFixed(2) : '',
           r.editedBeforeAcceptance ? 1 : 0,
           r.postAcceptance.totalLinesChanged,
           r.postAcceptance.proportionLinesChanged.toFixed(4),
           r.postAcceptance.changeFrequency,
-          r.postAcceptance.totalActiveModificationTimeMs,
-          r.postAcceptance.timeToFirstModificationMs ?? '',
-          r.reviewDurationMs ?? ''
+          (r.postAcceptance.totalActiveModificationTimeMs / 1000).toFixed(2),
+          r.postAcceptance.timeToFirstModificationMs !== null ? (r.postAcceptance.timeToFirstModificationMs / 1000).toFixed(2) : '',
+          r.reviewDurationMs !== null ? (r.reviewDurationMs / 1000).toFixed(2) : '',
+          r.selfReportedConfidence ?? '',
+          r.blockDeleted ? 1 : 0,
+          r.blockDeletionTimestamp !== null ? (r.blockDeletionTimestamp / 1000).toFixed(2) : ''
         ].join(',')
       );
 

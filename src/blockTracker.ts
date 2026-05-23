@@ -34,7 +34,8 @@ export class BlockTracker {
 
   handleDocumentChange(
     event: vscode.TextDocumentChangeEvent,
-    onModification: (record: InsertionRecord) => void
+    onModification: (record: InsertionRecord) => void,
+    onDeletion?: (record: InsertionRecord) => void
   ): void {
     const fileUri = event.document.uri.toString();
     const now = Date.now();
@@ -42,7 +43,6 @@ export class BlockTracker {
     for (const record of this.records.values()) {
       if (record.fileUri !== fileUri) continue;
       if (record.pendingConfirmation) {
-        // Still update line positions so block stays accurate after user confirms
         for (const change of event.contentChanges) {
           this.shiftLines(record, change);
         }
@@ -50,7 +50,7 @@ export class BlockTracker {
       }
 
       for (const change of event.contentChanges) {
-        this.processChange(record, change, now, onModification);
+        this.processChange(record, change, now, onModification, onDeletion);
       }
     }
   }
@@ -59,7 +59,8 @@ export class BlockTracker {
     record: InsertionRecord,
     change: vscode.TextDocumentContentChangeEvent,
     now: number,
-    onModification: (record: InsertionRecord) => void
+    onModification: (record: InsertionRecord) => void,
+    onDeletion?: (record: InsertionRecord) => void
   ): void {
     const changeStart = change.range.start.line;
     const changeEnd = change.range.end.line;
@@ -78,8 +79,17 @@ export class BlockTracker {
 
     if (isBelow) return;
 
+    // Detect full block deletion before clamping
+    const newEndLine = record.endLine + lineDelta;
+    if (newEndLine < record.startLine && !record.blockDeleted && record.acceptanceTimestamp) {
+      record.blockDeleted = true;
+      record.blockDeletionTimestamp = now;
+      onDeletion?.(record);
+      return;
+    }
+
     // Change overlaps with the block — adjust block size and record as modification
-    record.endLine = Math.max(record.startLine, record.endLine + lineDelta);
+    record.endLine = Math.max(record.startLine, newEndLine);
 
     if (record.pendingAcceptance) {
       record.editedBeforeAcceptance = true;

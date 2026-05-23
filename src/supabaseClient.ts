@@ -10,15 +10,18 @@ interface SupabaseRow {
   original_line_count: number;
   condition: string | null;
   acceptance_timestamp: number | null;
-  time_to_accept_ms: number | null;
+  time_to_accept_s: number | null;
   edited_before_acceptance: boolean;
   total_lines_changed: number;
   proportion_lines_changed: number;
   change_frequency: number;
-  total_active_modification_time_ms: number;
-  time_to_first_modification_ms: number | null;
+  total_active_modification_time_s: number;
+  time_to_first_modification_s: number | null;
   observation_complete: boolean;
-  review_duration_ms: number | null;
+  review_duration_s: number | null;
+  self_reported_confidence: number | null;
+  block_deleted: boolean;
+  block_deletion_timestamp_s: number | null;
   last_synced: number;
 }
 
@@ -55,20 +58,25 @@ export class SupabaseClient {
       original_line_count: record.originalLineCount,
       condition: record.condition,
       acceptance_timestamp: record.acceptanceTimestamp,
-      time_to_accept_ms:
+      time_to_accept_s:
         record.acceptanceTimestamp !== null
-          ? record.acceptanceTimestamp - record.insertionTimestamp
+          ? Math.round((record.acceptanceTimestamp - record.insertionTimestamp) / 1000 * 100) / 100
           : null,
       edited_before_acceptance: record.editedBeforeAcceptance,
       total_lines_changed: record.postAcceptance.totalLinesChanged,
       proportion_lines_changed: record.postAcceptance.proportionLinesChanged,
       change_frequency: record.postAcceptance.changeFrequency,
-      total_active_modification_time_ms:
-        record.postAcceptance.totalActiveModificationTimeMs,
-      time_to_first_modification_ms:
-        record.postAcceptance.timeToFirstModificationMs,
+      total_active_modification_time_s:
+        Math.round(record.postAcceptance.totalActiveModificationTimeMs / 1000 * 100) / 100,
+      time_to_first_modification_s:
+        record.postAcceptance.timeToFirstModificationMs !== null
+          ? Math.round(record.postAcceptance.timeToFirstModificationMs / 1000 * 100) / 100
+          : null,
       observation_complete: observationDone,
-      review_duration_ms: record.reviewDurationMs ?? null,
+      review_duration_s: record.reviewDurationMs !== null ? Math.round(record.reviewDurationMs / 1000 * 100) / 100 : null,
+      self_reported_confidence: record.selfReportedConfidence,
+      block_deleted: record.blockDeleted,
+      block_deletion_timestamp_s: record.blockDeletionTimestamp !== null ? Math.round(record.blockDeletionTimestamp / 1000 * 100) / 100 : null,
       last_synced: now
     };
 
