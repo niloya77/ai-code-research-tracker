@@ -4,6 +4,7 @@ export interface InsertionRecord {
   fileUri: string;
   fileName: string;
   originalLineCount: number;
+  commentDensity: number;
   startLine: number;
   endLine: number;
   // true while waiting for user to confirm it's AI-generated

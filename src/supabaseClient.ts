@@ -8,6 +8,7 @@ interface SupabaseRow {
   insertion_timestamp: number;
   file_name: string;
   original_line_count: number;
+  comment_density: number;
   condition: string | null;
   acceptance_timestamp: number | null;
   time_to_accept_s: number | null;
@@ -64,6 +65,7 @@ export class SupabaseClient {
       insertion_timestamp: record.insertionTimestamp,
       file_name: record.fileName,
       original_line_count: record.originalLineCount,
+      comment_density: record.commentDensity,
       condition: record.condition,
       acceptance_timestamp: record.acceptanceTimestamp,
       time_to_accept_s:

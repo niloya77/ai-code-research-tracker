@@ -93,6 +93,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           fileUri: event.document.uri.toString(),
           fileName: path.basename(event.document.uri.fsPath),
           originalLineCount: detected.lineCount,
+          commentDensity: detected.commentDensity,
           startLine: detected.startLine,
           endLine: detected.endLine,
           pendingConfirmation: true,
