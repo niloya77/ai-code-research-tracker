@@ -27,7 +27,16 @@ export class BlockTracker {
 
   loadAll(records: InsertionRecord[]): void {
     this.records.clear();
+    const now = Date.now();
     for (const r of records) {
+      // Migrate records saved before these fields existed
+      r.observationComplete = r.observationComplete ??
+        (r.observationWindowEndTimestamp ? now > r.observationWindowEndTimestamp : false);
+      r.lastSynced = r.lastSynced ?? null;
+      // Mark complete if window already elapsed
+      if (r.observationWindowEndTimestamp && now > r.observationWindowEndTimestamp) {
+        r.observationComplete = true;
+      }
       this.records.set(r.id, r);
     }
   }
@@ -100,6 +109,9 @@ export class BlockTracker {
       if (now <= record.observationWindowEndTimestamp) {
         this.recordPostAcceptanceEdit(record, changeStart, changeEnd, now);
         onModification(record);
+      } else if (!record.observationComplete) {
+        record.observationComplete = true;
+        onModification(record);
       }
     }
   }
@@ -170,6 +182,7 @@ export class BlockTracker {
     record.condition = record.editedBeforeAcceptance ? 'reviewed' : 'immediate';
     record.acceptanceTimestamp = now;
     record.observationWindowEndTimestamp = now + OBSERVATION_WINDOW_MS;
+    record.observationComplete = false;
     record.pendingAcceptance = false;
   }
 

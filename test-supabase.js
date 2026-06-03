@@ -1,7 +1,7 @@
 const https = require('https');
 
-const SUPABASE_URL = 'https://wvyrgdbjmxfnmduzhnha.supabase.co';
-const SUPABASE_KEY = 'sb_publishable_ZeDW_bl7vuno6k4oFBp71Q_QGowtcgI';
+const SUPABASE_URL = 'https://qcyxsuvbcdsxprkzlkkh.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFjeXhzdXZiY2RzeHBya3psa2toIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk4ODg1MzUsImV4cCI6MjA5NTQ2NDUzNX0.g52agmYZgdOmDmNreANtCPW-nYYmiBZH9j-KNNX7n-k';
 
 const now = Date.now();
 

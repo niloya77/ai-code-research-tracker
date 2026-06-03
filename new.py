@@ -15,3 +15,12 @@ name = "Mehmet"
 for i in range(3):
     print("Hello", name)
 print("Programm beendet")
+name = "Nil"
+for i in range(3):
+    print("Hi", name)
+print("Programm endet")
+
+name = "Nil"
+for i in range(3):
+    print("Hallo", name)
+print("Programm beendet")

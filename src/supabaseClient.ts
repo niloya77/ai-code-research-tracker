@@ -25,12 +25,15 @@ interface SupabaseRow {
   last_synced: number;
 }
 
-const DEFAULT_URL = 'https://wvyrgdbjmxfnmduzhnha.supabase.co';
-const DEFAULT_KEY = 'sb_publishable_ZeDW_bl7vuno6k4oFBp71Q_QGowtcgI';
+const DEFAULT_URL = 'https://qcyxsuvbcdsxprkzlkkh.supabase.co';
+const DEFAULT_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFjeXhzdXZiY2RzeHBya3psa2toIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk4ODg1MzUsImV4cCI6MjA5NTQ2NDUzNX0.g52agmYZgdOmDmNreANtCPW-nYYmiBZH9j-KNNX7n-k';
+const MAX_RETRIES = 3;
+const RETRY_DELAY_MS = 2000;
 
 export class SupabaseClient {
   private supabaseUrl: string;
   private supabaseKey: string;
+  private pendingQueue: SupabaseRow[] = [];
 
   constructor() {
     const cfg = vscode.workspace.getConfiguration('aiTracker');
@@ -42,13 +45,18 @@ export class SupabaseClient {
     return this.supabaseUrl.length > 0 && this.supabaseKey.length > 0;
   }
 
-  async sync(record: InsertionRecord, participantId: string): Promise<void> {
-    if (!this.isConfigured()) return;
+  hasPending(): boolean {
+    return this.pendingQueue.length > 0;
+  }
+
+  getPendingCount(): number {
+    return this.pendingQueue.length;
+  }
+
+  async sync(record: InsertionRecord, participantId: string): Promise<boolean> {
+    if (!this.isConfigured()) return false;
 
     const now = Date.now();
-    const observationDone =
-      record.observationWindowEndTimestamp !== null &&
-      now > record.observationWindowEndTimestamp;
 
     const row: SupabaseRow = {
       record_id: record.id,
@@ -72,7 +80,7 @@ export class SupabaseClient {
         record.postAcceptance.timeToFirstModificationMs !== null
           ? Math.round(record.postAcceptance.timeToFirstModificationMs / 1000 * 100) / 100
           : null,
-      observation_complete: observationDone,
+      observation_complete: record.observationComplete,
       review_duration_s: record.reviewDurationMs !== null ? Math.round(record.reviewDurationMs / 1000 * 100) / 100 : null,
       self_reported_confidence: record.selfReportedConfidence,
       block_deleted: record.blockDeleted,
@@ -80,10 +88,51 @@ export class SupabaseClient {
       last_synced: now
     };
 
-    await this.upsert(row);
+    const ok = await this.upsertWithRetry(row);
+    if (!ok) {
+      // Kuyruğa ekle — aynı record_id varsa güncelle
+      const existing = this.pendingQueue.findIndex(r => r.record_id === row.record_id);
+      if (existing >= 0) {
+        this.pendingQueue[existing] = row;
+      } else {
+        this.pendingQueue.push(row);
+      }
+    }
+    return ok;
   }
 
-  private upsert(row: SupabaseRow): Promise<void> {
+  async retryPending(): Promise<number> {
+    if (this.pendingQueue.length === 0) return 0;
+
+    let flushed = 0;
+    const remaining: SupabaseRow[] = [];
+
+    for (const row of this.pendingQueue) {
+      row.last_synced = Date.now();
+      const ok = await this.upsertWithRetry(row);
+      if (ok) {
+        flushed++;
+      } else {
+        remaining.push(row);
+      }
+    }
+
+    this.pendingQueue = remaining;
+    return flushed;
+  }
+
+  private async upsertWithRetry(row: SupabaseRow): Promise<boolean> {
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      const ok = await this.upsert(row);
+      if (ok) return true;
+      if (attempt < MAX_RETRIES) {
+        await delay(RETRY_DELAY_MS * attempt);
+      }
+    }
+    return false;
+  }
+
+  private upsert(row: SupabaseRow): Promise<boolean> {
     return new Promise(resolve => {
       const body = JSON.stringify([row]);
       const urlObj = new URL(`${this.supabaseUrl}/rest/v1/insertion_records`);
@@ -103,16 +152,20 @@ export class SupabaseClient {
 
       const req = https.request(options, res => {
         res.resume();
-        res.on('end', resolve);
+        res.on('end', () => resolve(res.statusCode !== undefined && res.statusCode < 400));
       });
 
       req.on('error', err => {
         console.error('[AITracker] Supabase sync error:', err.message);
-        resolve();
+        resolve(false);
       });
 
       req.write(body);
       req.end();
     });
   }
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }

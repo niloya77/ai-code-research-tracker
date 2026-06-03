@@ -35,9 +35,11 @@ let dataStore: DataStore;
 let supabase: SupabaseClient;
 let participantId: string | null = null;
 let statusBarItem: vscode.StatusBarItem;
+let syncStatusItem: vscode.StatusBarItem;
 let pendingRecordId: string | null = null;
 let reviewTimerInterval: ReturnType<typeof setInterval> | null = null;
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
+let retryInterval: ReturnType<typeof setInterval> | null = null;
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   tracker = new BlockTracker();
@@ -51,7 +53,24 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
   statusBarItem.command = 'aiTracker.acceptCode';
-  context.subscriptions.push(statusBarItem);
+
+  syncStatusItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 99);
+  syncStatusItem.tooltip = 'AI Tracker: Supabase sync status';
+  syncStatusItem.show();
+  updateSyncStatus(true);
+
+  context.subscriptions.push(statusBarItem, syncStatusItem);
+
+  // Her 60 saniyede bir bekleyen kayıtları yeniden gönder
+  retryInterval = setInterval(async () => {
+    if (supabase.hasPending()) {
+      const flushed = await supabase.retryPending();
+      if (flushed > 0) {
+        console.log(`[AITracker] Retry: ${flushed} record(s) synced.`);
+        updateSyncStatus(true);
+      }
+    }
+  }, 60_000);
 
   context.subscriptions.push(
     vscode.commands.registerCommand('aiTracker.acceptCode', handleAccept),
@@ -88,6 +107,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           selfReportedConfidence: null,
           blockDeleted: false,
           blockDeletionTimestamp: null,
+          observationComplete: false,
+          lastSynced: null,
           postAcceptance: {
             editSessions: [],
             changedAbsoluteLines: [],
@@ -292,9 +313,32 @@ async function exportCSV(): Promise<void> {
 
 function syncToSupabase(record: InsertionRecord): void {
   if (!participantId) return;
-  supabase.sync(record, participantId).catch(err =>
-    console.error('[AITracker] Supabase sync failed:', err)
-  );
+  supabase.sync(record, participantId)
+    .then(ok => {
+      if (ok) {
+        record.lastSynced = Date.now();
+        scheduleSave();
+      }
+      updateSyncStatus(ok);
+    })
+    .catch(err => {
+      console.error('[AITracker] Supabase sync failed:', err);
+      updateSyncStatus(false);
+    });
+}
+
+function updateSyncStatus(lastOk: boolean): void {
+  const pending = supabase.getPendingCount();
+  if (pending > 0) {
+    syncStatusItem.text = `$(sync-ignored) Sync: ${pending} pending`;
+    syncStatusItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+  } else if (lastOk) {
+    syncStatusItem.text = '$(check) Sync: OK';
+    syncStatusItem.backgroundColor = undefined;
+  } else {
+    syncStatusItem.text = '$(warning) Sync: error';
+    syncStatusItem.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
+  }
 }
 
 function scheduleSave(): void {
@@ -304,6 +348,10 @@ function scheduleSave(): void {
 
 export function deactivate(): void {
   stopReviewTimer();
+  if (retryInterval) {
+    clearInterval(retryInterval);
+    retryInterval = null;
+  }
   if (saveTimer) {
     clearTimeout(saveTimer);
     dataStore.save(tracker.getAll());

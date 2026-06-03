@@ -49,7 +49,9 @@ export class DataStore {
       'review_duration_s',
       'self_reported_confidence',
       'block_deleted',
-      'block_deletion_timestamp_s'
+      'block_deletion_timestamp_s',
+      'observation_complete',
+      'last_synced_s'
     ].join(',');
 
     const rows = records
@@ -72,7 +74,9 @@ export class DataStore {
           r.reviewDurationMs !== null ? (r.reviewDurationMs / 1000).toFixed(2) : '',
           r.selfReportedConfidence ?? '',
           r.blockDeleted ? 1 : 0,
-          r.blockDeletionTimestamp !== null ? (r.blockDeletionTimestamp / 1000).toFixed(2) : ''
+          r.blockDeletionTimestamp !== null ? (r.blockDeletionTimestamp / 1000).toFixed(2) : '',
+          r.observationComplete ? 1 : 0,
+          r.lastSynced !== null ? (r.lastSynced / 1000).toFixed(2) : ''
         ].join(',')
       );
 

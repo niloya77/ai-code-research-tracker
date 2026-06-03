@@ -20,6 +20,8 @@ export interface InsertionRecord {
   selfReportedConfidence: number | null;
   blockDeleted: boolean;
   blockDeletionTimestamp: number | null;
+  observationComplete: boolean;
+  lastSynced: number | null;
   postAcceptance: PostAcceptanceData;
 }
 
