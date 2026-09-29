@@ -8,14 +8,12 @@ interface SupabaseRow {
   insertion_timestamp: number;
   file_name: string;
   original_line_count: number;
-  comment_density: number;
   condition: string | null;
   acceptance_timestamp: number | null;
   time_to_accept_s: number | null;
   edited_before_acceptance: boolean;
   total_lines_changed: number;
   proportion_lines_changed: number;
-  change_frequency: number;
   total_active_modification_time_s: number;
   time_to_first_modification_s: number | null;
   observation_complete: boolean;
@@ -28,6 +26,7 @@ interface SupabaseRow {
 
 const DEFAULT_URL = 'https://qcyxsuvbcdsxprkzlkkh.supabase.co';
 const DEFAULT_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFjeXhzdXZiY2RzeHBya3psa2toIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk4ODg1MzUsImV4cCI6MjA5NTQ2NDUzNX0.g52agmYZgdOmDmNreANtCPW-nYYmiBZH9j-KNNX7n-k';
+const TABLE_NAME = 'insertion_records';
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 2000;
 
@@ -65,7 +64,6 @@ export class SupabaseClient {
       insertion_timestamp: record.insertionTimestamp,
       file_name: record.fileName,
       original_line_count: record.originalLineCount,
-      comment_density: record.commentDensity,
       condition: record.condition,
       acceptance_timestamp: record.acceptanceTimestamp,
       time_to_accept_s:
@@ -75,7 +73,6 @@ export class SupabaseClient {
       edited_before_acceptance: record.editedBeforeAcceptance,
       total_lines_changed: record.postAcceptance.totalLinesChanged,
       proportion_lines_changed: record.postAcceptance.proportionLinesChanged,
-      change_frequency: record.postAcceptance.changeFrequency,
       total_active_modification_time_s:
         Math.round(record.postAcceptance.totalActiveModificationTimeMs / 1000 * 100) / 100,
       time_to_first_modification_s:
@@ -99,6 +96,10 @@ export class SupabaseClient {
       } else {
         this.pendingQueue.push(row);
       }
+    } else {
+      // Bu kayıt için daha eski, kuyrukta bekleyen bir kopya varsa at —
+      // yoksa retryPending() bu güncel veriyi eski veriyle ezer.
+      this.pendingQueue = this.pendingQueue.filter(r => r.record_id !== row.record_id);
     }
     return ok;
   }
@@ -137,7 +138,7 @@ export class SupabaseClient {
   private upsert(row: SupabaseRow): Promise<boolean> {
     return new Promise(resolve => {
       const body = JSON.stringify([row]);
-      const urlObj = new URL(`${this.supabaseUrl}/rest/v1/insertion_records`);
+      const urlObj = new URL(`${this.supabaseUrl}/rest/v1/${TABLE_NAME}`);
 
       const options: https.RequestOptions = {
         hostname: urlObj.hostname,
@@ -153,8 +154,15 @@ export class SupabaseClient {
       };
 
       const req = https.request(options, res => {
-        res.resume();
-        res.on('end', () => resolve(res.statusCode !== undefined && res.statusCode < 400));
+        let responseBody = '';
+        res.on('data', chunk => { responseBody += chunk; });
+        res.on('end', () => {
+          const ok = res.statusCode !== undefined && res.statusCode < 400;
+          if (!ok) {
+            console.error(`[AITracker] Supabase ${res.statusCode}:`, responseBody);
+          }
+          resolve(ok);
+        });
       });
 
       req.on('error', err => {

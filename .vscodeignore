@@ -1,11 +1,3 @@
-.vscode/**
-.vscode-test/**
-src/**
-.gitignore
-tsconfig.json
-*.map
-node_modules/**
-test-detection.js
-new.py
-nil.py
-test.py
+**/*
+!out/**
+!package.json

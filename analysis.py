@@ -112,7 +112,6 @@ def fetch_records():
             "participant_id,condition,"
             "proportion_lines_changed,"
             "total_active_modification_time_s,"
-            "change_frequency,"
             "time_to_first_modification_s,"
             "review_duration_s,"
             "self_reported_confidence,"

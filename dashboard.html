@@ -1,0 +1,811 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Tracker — Research Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface2: #22263a;
+    --border: rgba(255,255,255,.08);
+    --text: #e2e8f0;
+    --muted: #6b7280;
+    --accent: #6366f1;
+    --green: #4ade80;
+    --blue: #60a5fa;
+    --red: #f87171;
+    --yellow: #fbbf24;
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+    line-height: 1.5;
+    min-height: 100vh;
+  }
+
+  /* ── Top bar ── */
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 32px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+  header h1 {
+    font-size: 1em;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  header h1 .dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--green);
+    box-shadow: 0 0 8px var(--green);
+    flex-shrink: 0;
+  }
+  .header-right { display: flex; align-items: center; gap: 12px; }
+  .refresh-btn {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 6px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.85em;
+    transition: background 0.15s;
+  }
+  .refresh-btn:hover { background: var(--accent); border-color: var(--accent); }
+  #last-updated { font-size: 0.78em; color: var(--muted); }
+
+  /* ── Main layout ── */
+  main { padding: 32px; max-width: 1200px; margin: 0 auto; }
+
+  /* ── Filters ── */
+  .filters {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 28px;
+    flex-wrap: wrap;
+  }
+  .filter-btn {
+    padding: 6px 14px;
+    border-radius: 20px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 0.82em;
+    transition: all 0.15s;
+  }
+  .filter-btn:hover { color: var(--text); border-color: rgba(255,255,255,.2); }
+  .filter-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+  /* ── Section ── */
+  section { margin-bottom: 40px; }
+  .section-title {
+    font-size: 0.7em;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--muted);
+    margin-bottom: 14px;
+  }
+
+  /* ── Stat cards ── */
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 14px;
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px 20px 14px;
+    transition: border-color 0.15s;
+  }
+  .card:hover { border-color: rgba(255,255,255,.18); }
+  .card .val {
+    font-size: 2.4em;
+    font-weight: 800;
+    line-height: 1;
+    margin-bottom: 6px;
+    letter-spacing: -0.02em;
+  }
+  .card .lbl {
+    font-size: 0.72em;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+  }
+  .card.c-total   .val { color: var(--text); }
+  .card.c-reviewed  .val { color: var(--green); }
+  .card.c-immediate .val { color: var(--blue); }
+  .card.c-rejected  .val { color: var(--red); }
+  .card.c-confidence .val { color: var(--yellow); }
+  .card.c-participants .val { color: var(--accent); }
+
+  /* ── Averages ── */
+  .avg-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 12px;
+  }
+  .avg-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 18px;
+  }
+  .avg-box .alabel {
+    font-size: 0.72em;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+  .avg-row { display: flex; gap: 16px; flex-wrap: wrap; }
+  .aval { font-size: 1.15em; font-weight: 700; color: var(--text); }
+  .atag { font-size: 0.72em; font-weight: 400; color: var(--muted); margin-left: 2px; }
+
+  /* ── Participant chips ── */
+  .p-chips { display: flex; gap: 8px; flex-wrap: wrap; }
+  .p-chip {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 0.85em;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .p-chip:hover { border-color: rgba(255,255,255,.2); }
+  .p-chip.selected { border-color: var(--accent); background: rgba(99,102,241,.12); }
+  .p-chip .pid { font-weight: 700; }
+  .p-chip .pcount { color: var(--muted); font-size: 0.85em; }
+
+  /* ── Table ── */
+  .table-wrap {
+    overflow-x: auto;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+  }
+  table { width: 100%; border-collapse: collapse; font-size: 0.86em; }
+  thead th {
+    padding: 10px 16px;
+    text-align: left;
+    font-size: 0.72em;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    white-space: nowrap;
+  }
+  tbody tr { border-bottom: 1px solid rgba(255,255,255,.04); }
+  tbody tr:last-child { border-bottom: none; }
+  tbody tr:hover { background: rgba(255,255,255,.03); }
+  tbody td { padding: 9px 16px; vertical-align: middle; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; font-family: 'SF Mono', monospace; }
+  td.muted { color: var(--muted); font-size: 0.85em; }
+
+  .badge {
+    display: inline-block;
+    padding: 3px 9px;
+    border-radius: 5px;
+    font-size: 0.76em;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .badge.reviewed  { background: rgba(74,222,128,.15);  color: var(--green); }
+  .badge.immediate { background: rgba(96,165,250,.15);  color: var(--blue); }
+  .badge.rejected  { background: rgba(248,113,113,.15); color: var(--red); }
+
+  /* ── Loading / empty ── */
+  .loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 60px;
+    color: var(--muted);
+  }
+  .spinner {
+    width: 18px; height: 18px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .empty { padding: 48px; text-align: center; color: var(--muted); font-style: italic; }
+
+  /* ── Stars (confidence) ── */
+  .stars { color: var(--yellow); letter-spacing: 1px; }
+
+  /* ── Analysis section ── */
+  .analysis-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 14px;
+    margin-bottom: 20px;
+  }
+  .analysis-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px 20px;
+  }
+  .analysis-box h3 {
+    font-size: 0.78em;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+    margin-bottom: 14px;
+  }
+  .analysis-box .rq-label {
+    font-size: 0.88em;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 10px;
+  }
+  .stat-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 5px 0;
+    border-bottom: 1px solid rgba(255,255,255,.04);
+    font-size: 0.85em;
+  }
+  .stat-row:last-child { border-bottom: none; }
+  .stat-row .skey { color: var(--muted); }
+  .stat-row .sval { font-weight: 600; font-family: 'SF Mono', monospace; font-size: 0.92em; }
+  .sig-yes { color: var(--green); font-weight: 700; }
+  .sig-no  { color: var(--muted); }
+  .sig-unknown { color: var(--yellow); }
+
+  .p-table { width: 100%; border-collapse: collapse; font-size: 0.82em; margin-top: 4px; }
+  .p-table th {
+    text-align: right; padding: 5px 8px;
+    font-size: 0.75em; text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--muted); border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  .p-table th:first-child { text-align: left; }
+  .p-table td { padding: 5px 8px; text-align: right; font-family: 'SF Mono', monospace; }
+  .p-table td:first-child { text-align: left; font-family: inherit; font-weight: 600; }
+  .p-table tr { border-bottom: 1px solid rgba(255,255,255,.04); }
+  .p-table tr:last-child { border-bottom: none; }
+
+  /* ── Participant group rows ── */
+  .p-summary-row { cursor: pointer; background: var(--surface2); }
+  .p-summary-row:hover { background: rgba(255,255,255,.06); }
+  .p-summary {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+    padding: 2px 0;
+  }
+  .expand-arrow {
+    display: inline-block;
+    width: 12px;
+    color: var(--muted);
+    font-size: 0.85em;
+  }
+  .p-summary-name { font-size: 0.95em; }
+  .p-summary-stat { color: var(--muted); font-size: 0.85em; }
+  .p-detail-row td:first-child { padding-left: 32px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1><span class="dot"></span>AI Code Research Tracker</h1>
+  <div class="header-right">
+    <span id="last-updated"></span>
+    <button class="refresh-btn" onclick="loadData()">↻ Refresh</button>
+  </div>
+</header>
+
+<main>
+
+  <!-- Summary cards -->
+  <section>
+    <div class="section-title">Summary</div>
+    <div class="cards" id="summary-cards">
+      <div class="loading"><div class="spinner"></div> Loading…</div>
+    </div>
+  </section>
+
+  <!-- Averages -->
+  <section>
+    <div class="section-title">Averages</div>
+    <div class="avg-grid" id="avg-grid">
+      <div class="loading"><div class="spinner"></div></div>
+    </div>
+  </section>
+
+  <!-- Participants -->
+  <section>
+    <div class="section-title">Participants</div>
+    <div class="p-chips" id="participant-chips"></div>
+  </section>
+
+  <!-- Analysis -->
+  <section>
+    <div class="section-title">Statistical Analysis</div>
+    <div id="analysis-container">
+      <div class="loading"><div class="spinner"></div> Loading…</div>
+    </div>
+  </section>
+
+  <!-- Table -->
+  <section>
+    <div class="section-title">Insertion Records</div>
+    <div id="table-container">
+      <div class="loading"><div class="spinner"></div> Loading…</div>
+    </div>
+  </section>
+
+</main>
+
+<script>
+  const SUPABASE_URL = 'https://qcyxsuvbcdsxprkzlkkh.supabase.co';
+  const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFjeXhzdXZiY2RzeHBya3psa2toIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk4ODg1MzUsImV4cCI6MjA5NTQ2NDUzNX0.g52agmYZgdOmDmNreANtCPW-nYYmiBZH9j-KNNX7n-k';
+
+  const { createClient } = supabase;
+  const db = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+  const EXCLUDED_PARTICIPANTS = new Set(['ss']);
+
+  let allRecords = [];
+  let selectedParticipant = null;
+  let expandedParticipants = new Set();
+
+  function toggleParticipant(pid) {
+    if (expandedParticipants.has(pid)) expandedParticipants.delete(pid);
+    else expandedParticipants.add(pid);
+    render();
+  }
+
+  function avg(arr, fn) {
+    if (!arr.length) return null;
+    return arr.reduce((s, r) => s + (fn(r) ?? 0), 0) / arr.length;
+  }
+
+  function fmt(n, decimals = 2) {
+    if (n == null) return '—';
+    return Number(n).toFixed(decimals);
+  }
+
+  function stars(n) {
+    if (n == null) return '—';
+    return '<span class="stars">' + '★'.repeat(n) + '<span style="opacity:.3">' + '★'.repeat(5 - n) + '</span></span>';
+  }
+
+  function timeAgo(ts) {
+    if (!ts) return '—';
+    const d = new Date(ts * 1000);
+    return d.toLocaleString();
+  }
+
+  // ── Stats helpers ──────────────────────────────────────────────────────────
+
+  function median(vals) {
+    if (!vals.length) return null;
+    const s = [...vals].sort((a, b) => a - b);
+    const m = Math.floor(s.length / 2);
+    return s.length % 2 === 0 ? (s[m - 1] + s[m]) / 2 : s[m];
+  }
+
+  function mean(vals) {
+    if (!vals.length) return null;
+    return vals.reduce((a, b) => a + b, 0) / vals.length;
+  }
+
+  function rankData(arr) {
+    const indexed = arr.map((v, i) => ({ v, i })).sort((a, b) => a.v - b.v);
+    const ranks = new Array(arr.length);
+    let i = 0;
+    while (i < indexed.length) {
+      let j = i;
+      while (j < indexed.length && indexed[j].v === indexed[i].v) j++;
+      const avgRank = (i + 1 + j) / 2;
+      for (let k = i; k < j; k++) ranks[indexed[k].i] = avgRank;
+      i = j;
+    }
+    return ranks;
+  }
+
+  function normalCDF(z) {
+    const t = 1 / (1 + 0.2315419 * Math.abs(z));
+    const d = 0.3989423 * Math.exp(-z * z / 2);
+    const p = d * t * (0.3193815 + t * (-0.3565638 + t * (1.7814779 + t * (-1.8212560 + t * 1.3302744))));
+    return z > 0 ? 1 - p : p;
+  }
+
+  function wilcoxon(x, y) {
+    const diffs = x.map((xi, i) => xi - y[i]);
+    const nonZero = diffs.filter(d => d !== 0);
+    const n = nonZero.length;
+    if (n < 3) return null;
+
+    const absD = nonZero.map(d => Math.abs(d));
+    const ranks = rankData(absD);
+
+    let Wplus = 0, Wminus = 0;
+    nonZero.forEach((d, i) => {
+      if (d > 0) Wplus += ranks[i];
+      else Wminus += ranks[i];
+    });
+
+    const W = Math.min(Wplus, Wminus);
+    const mu = n * (n + 1) / 4;
+    const sigma = Math.sqrt(n * (n + 1) * (2 * n + 1) / 24);
+    const z = (W + 0.5 - mu) / sigma;
+    const p = 2 * normalCDF(z);
+    const r = 1 - (4 * W) / (n * (n + 1));
+    return { W, p: Math.min(p, 1), r, n };
+  }
+
+  function aggregatePerParticipant(records, col) {
+    const buckets = {};
+    records.forEach(r => {
+      if (!buckets[r.participant_id]) buckets[r.participant_id] = { reviewed: [], immediate: [] };
+      if ((r.condition === 'reviewed' || r.condition === 'immediate') && r[col] != null)
+        buckets[r.participant_id][r.condition].push(+r[col]);
+    });
+    const rev = [], imm = [], pids = [];
+    Object.entries(buckets).forEach(([pid, g]) => {
+      if (g.reviewed.length && g.immediate.length) {
+        rev.push(mean(g.reviewed));
+        imm.push(mean(g.immediate));
+        pids.push(pid);
+      }
+    });
+    return { rev, imm, pids };
+  }
+
+  async function renderAnalysis(records) {
+    document.getElementById('analysis-container').innerHTML =
+      '<div class="loading"><div class="spinner"></div> Running analysis…</div>';
+
+    // Try Python API first (LME + Shapiro-Wilk)
+    let apiData = null;
+    try {
+      const url = selectedParticipant
+        ? `http://localhost:5050/api/analysis?participant_id=${encodeURIComponent(selectedParticipant)}`
+        : 'http://localhost:5050/api/analysis';
+      const resp = await fetch(url);
+      if (resp.ok) apiData = await resp.json();
+    } catch (_) { /* server not running, fall back to JS */ }
+
+    if (apiData) {
+      renderAnalysisFromAPI(apiData, records);
+    } else {
+      renderAnalysisJS(records);
+    }
+  }
+
+  function rqBoxFromAPI(rq, title, label) {
+    if (rq.error) {
+      return `<div class="analysis-box">
+        <h3>${title}</h3>
+        <div class="rq-label">${label}</div>
+        <div class="stat-row"><span class="skey">Result</span><span class="sval sig-unknown">${rq.error}</span></div>
+      </div>`;
+    }
+
+    const sw = rq.shapiro;
+    const swHtml = sw && !sw.error
+      ? `<div class="stat-row"><span class="skey">Shapiro-Wilk W</span><span class="sval">${sw.stat} (p=${sw.p}) → <span class="${sw.normal ? 'sig-yes' : 'sig-no'}">${sw.normal ? 'normal ✓' : 'not normal ✗'}</span></span></div>`
+      : '';
+
+    let testHtml = '';
+    if (rq.method === 'LME' && rq.lme) {
+      const l = rq.lme;
+      testHtml = `
+        <div class="stat-row"><span class="skey">Method</span><span class="sval" style="color:var(--accent)">Linear Mixed-Effects Model</span></div>
+        <div class="stat-row"><span class="skey">Coefficient (reviewed)</span><span class="sval">${l.coef}</span></div>
+        <div class="stat-row"><span class="skey">95% CI</span><span class="sval">[${l.ci_low}, ${l.ci_high}]</span></div>
+        <div class="stat-row"><span class="skey">p-value</span><span class="sval">${l.p}</span></div>
+        <div class="stat-row"><span class="skey">Significance</span><span class="sval ${l.significant ? 'sig-yes' : 'sig-no'}">${l.significant ? 'SIGNIFICANT ✓ (α=0.05)' : 'not significant'}</span></div>`;
+    } else if (rq.wilcoxon) {
+      const w = rq.wilcoxon;
+      testHtml = `
+        <div class="stat-row"><span class="skey">Method</span><span class="sval sig-unknown">Wilcoxon Signed-Rank (fallback)</span></div>
+        <div class="stat-row"><span class="skey">W statistic</span><span class="sval">${w.W}</span></div>
+        <div class="stat-row"><span class="skey">p-value</span><span class="sval">${w.p}</span></div>
+        <div class="stat-row"><span class="skey">Effect size r</span><span class="sval">${w.r}</span></div>
+        <div class="stat-row"><span class="skey">n pairs</span><span class="sval">${w.n}</span></div>
+        <div class="stat-row"><span class="skey">Significance</span><span class="sval ${w.significant ? 'sig-yes' : 'sig-no'}">${w.significant ? 'SIGNIFICANT ✓ (α=0.05)' : 'not significant'}</span></div>`;
+    }
+
+    return `<div class="analysis-box">
+      <h3>${title}</h3>
+      <div class="rq-label">${label}</div>
+      <div class="stat-row"><span class="skey">Paired participants</span><span class="sval">${rq.n_pairs}</span></div>
+      <div class="stat-row"><span class="skey">Reviewed — mean</span><span class="sval">${rq.mean_reviewed ?? '—'}</span></div>
+      <div class="stat-row"><span class="skey">Immediate — mean</span><span class="sval">${rq.mean_immediate ?? '—'}</span></div>
+      ${swHtml}
+      ${testHtml}
+    </div>`;
+  }
+
+  function renderAnalysisFromAPI(d, records) {
+    const ex = d.exploratory || {};
+    const f  = v => v != null ? v : '—';
+
+    // Per-participant table (still computed from raw records)
+    const buckets = {};
+    records.filter(r => r.observation_complete && (r.condition === 'reviewed' || r.condition === 'immediate'))
+      .forEach(r => {
+        if (!buckets[r.participant_id]) buckets[r.participant_id] = { reviewed: [], immediate: [] };
+        buckets[r.participant_id][r.condition].push(r);
+      });
+    const pRows = Object.entries(buckets).sort((a, b) => a[0].localeCompare(b[0])).map(([pid, g]) => {
+      const fm = (lst, col) => { const v = median(lst.map(r => r[col]).filter(x => x != null)); return v != null ? v.toFixed(3) : '—'; };
+      return `<tr><td>${pid}</td><td>${g.reviewed.length}</td><td>${g.immediate.length}</td>
+        <td>${fm(g.reviewed,'proportion_lines_changed')}</td><td>${fm(g.immediate,'proportion_lines_changed')}</td>
+        <td>${fm(g.reviewed,'total_active_modification_time_s')}</td><td>${fm(g.immediate,'total_active_modification_time_s')}</td></tr>`;
+    }).join('');
+
+    document.getElementById('analysis-container').innerHTML = `
+      <div class="analysis-grid">
+        <div class="analysis-box" style="border-color:rgba(99,102,241,.3)">
+          <h3>Data scope</h3>
+          <div class="stat-row"><span class="skey">observation_complete</span><span class="sval">${d.total} records</span></div>
+          <div class="stat-row"><span class="skey">Reviewed</span><span class="sval">${d.reviewed_n}</span></div>
+          <div class="stat-row"><span class="skey">Immediate</span><span class="sval">${d.immediate_n}</span></div>
+          <div class="stat-row"><span class="skey">Source</span><span class="sval sig-yes">Python API ✓</span></div>
+        </div>
+        ${rqBoxFromAPI(d.rq1, 'RQ1', 'Proportion of lines changed after acceptance')}
+        ${rqBoxFromAPI(d.rq2, 'RQ2', 'Total active modification time after acceptance (s)')}
+        <div class="analysis-box">
+          <h3>Exploratory Measures</h3>
+          <div class="stat-row"><span class="skey">Confidence reviewed</span><span class="sval">${f(ex.confidence_reviewed)}</span></div>
+          <div class="stat-row"><span class="skey">Confidence immediate</span><span class="sval">${f(ex.confidence_immediate)}</span></div>
+          <div class="stat-row"><span class="skey">Time to first edit — reviewed</span><span class="sval">${f(ex.time_to_first_mod_reviewed)}s</span></div>
+          <div class="stat-row"><span class="skey">Time to first edit — immediate</span><span class="sval">${f(ex.time_to_first_mod_immediate)}s</span></div>
+          <div class="stat-row"><span class="skey">Review duration mean</span><span class="sval">${f(ex.review_duration_mean)}s</span></div>
+          <div class="stat-row"><span class="skey">Review duration median</span><span class="sval">${f(ex.review_duration_median)}s</span></div>
+          <div class="stat-row"><span class="skey">Block deleted reviewed</span><span class="sval">${f(ex.block_deleted_reviewed)} / ${d.reviewed_n}</span></div>
+          <div class="stat-row"><span class="skey">Block deleted immediate</span><span class="sval">${f(ex.block_deleted_immediate)} / ${d.immediate_n}</span></div>
+        </div>
+        <div class="analysis-box" style="grid-column:1/-1">
+          <h3>Per-Participant Summary</h3>
+          <div style="overflow-x:auto">
+          <table class="p-table">
+            <thead><tr><th style="text-align:left">ID</th><th>rev_n</th><th>imm_n</th><th>med_prop_rev</th><th>med_prop_imm</th><th>med_time_rev</th><th>med_time_imm</th></tr></thead>
+            <tbody>${pRows || '<tr><td colspan="7" style="text-align:center;color:var(--muted)">No paired data yet</td></tr>'}</tbody>
+          </table>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  function renderAnalysisJS(records) {
+    // Fallback: pure JS Wilcoxon (no LME)
+    const completed = records.filter(r =>
+      (r.condition === 'reviewed' || r.condition === 'immediate') && r.observation_complete
+    );
+    const reviewed  = completed.filter(r => r.condition === 'reviewed');
+    const immediate = completed.filter(r => r.condition === 'immediate');
+
+    const rq1data = aggregatePerParticipant(completed, 'proportion_lines_changed');
+    const rq2data = aggregatePerParticipant(completed, 'total_active_modification_time_s');
+    const w1 = rq1data.rev.length >= 3 ? wilcoxon(rq1data.rev, rq1data.imm) : null;
+    const w2 = rq2data.rev.length >= 3 ? wilcoxon(rq2data.rev, rq2data.imm) : null;
+
+    function rqBox(title, label, data, result) {
+      const n = data.rev.length;
+      const meanRev = mean(data.rev);
+      const meanImm = mean(data.imm);
+      const inner = !result
+        ? `<div class="stat-row"><span class="skey">Result</span><span class="sval sig-unknown">Not enough pairs (n=${n}, need ≥3)</span></div>`
+        : `<div class="stat-row"><span class="skey">Method</span><span class="sval sig-unknown">Wilcoxon (start server.py for LME)</span></div>
+           <div class="stat-row"><span class="skey">W</span><span class="sval">${result.W.toFixed(1)}</span></div>
+           <div class="stat-row"><span class="skey">p-value</span><span class="sval">${result.p.toFixed(4)}</span></div>
+           <div class="stat-row"><span class="skey">Effect size r</span><span class="sval">${result.r.toFixed(3)}</span></div>
+           <div class="stat-row"><span class="skey">Significance</span><span class="sval ${result.p < 0.05 ? 'sig-yes' : 'sig-no'}">${result.p < 0.05 ? 'SIGNIFICANT ✓' : 'not significant'}</span></div>`;
+      return `<div class="analysis-box">
+        <h3>${title}</h3><div class="rq-label">${label}</div>
+        <div class="stat-row"><span class="skey">Paired participants</span><span class="sval">${n}</span></div>
+        <div class="stat-row"><span class="skey">Reviewed — mean</span><span class="sval">${meanRev != null ? meanRev.toFixed(4) : '—'}</span></div>
+        <div class="stat-row"><span class="skey">Immediate — mean</span><span class="sval">${meanImm != null ? meanImm.toFixed(4) : '—'}</span></div>
+        ${inner}</div>`;
+    }
+
+    const revDurs = reviewed.map(r => r.review_duration_s).filter(v => v != null).map(Number);
+    document.getElementById('analysis-container').innerHTML = `
+      <div style="margin-bottom:12px;padding:10px 14px;background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.25);border-radius:8px;font-size:0.83em;color:var(--yellow)">
+        ⚠ Python server is not running — LME unavailable. Run: <code style="background:rgba(0,0,0,.3);padding:2px 6px;border-radius:4px">python3 server.py</code> then refresh.
+      </div>
+      <div class="analysis-grid">
+        ${rqBox('RQ1','Proportion of lines changed after acceptance', rq1data, w1)}
+        ${rqBox('RQ2','Total active modification time after acceptance (s)', rq2data, w2)}
+      </div>`;
+  }
+
+  async function loadData() {
+    document.getElementById('last-updated').textContent = '';
+
+    const { data, error } = await db
+      .from('insertion_records')
+      .select('*')
+      .order('insertion_timestamp', { ascending: false });
+
+    if (error) {
+      document.getElementById('summary-cards').innerHTML =
+        `<div class="empty">Error: ${error.message}</div>`;
+      return;
+    }
+
+    allRecords = (data || []).filter(r => !EXCLUDED_PARTICIPANTS.has(r.participant_id));
+    document.getElementById('last-updated').textContent =
+      'Updated ' + new Date().toLocaleTimeString();
+
+    renderParticipants();
+    render();
+  }
+
+  function renderParticipants() {
+    const participants = [...new Set(allRecords.map(r => r.participant_id))].sort();
+    const container = document.getElementById('participant-chips');
+    container.innerHTML = '';
+
+    const allChip = document.createElement('div');
+    allChip.className = 'p-chip' + (selectedParticipant === null ? ' selected' : '');
+    allChip.innerHTML = `<span class="pid">All</span><span class="pcount">${allRecords.length}</span>`;
+    allChip.onclick = () => { selectedParticipant = null; renderParticipants(); render(); };
+    container.appendChild(allChip);
+
+    participants.forEach(pid => {
+      const count = allRecords.filter(r => r.participant_id === pid).length;
+      const chip = document.createElement('div');
+      chip.className = 'p-chip' + (selectedParticipant === pid ? ' selected' : '');
+      chip.innerHTML = `<span class="pid">${pid}</span><span class="pcount">${count}</span>`;
+      chip.onclick = () => { selectedParticipant = pid; renderParticipants(); render(); };
+      container.appendChild(chip);
+    });
+  }
+
+  function render() {
+    const records = selectedParticipant
+      ? allRecords.filter(r => r.participant_id === selectedParticipant)
+      : allRecords;
+
+    const accepted = records.filter(r => r.condition !== null && r.condition !== 'rejected');
+    const reviewed = records.filter(r => r.condition === 'reviewed');
+    const immediate = records.filter(r => r.condition === 'immediate');
+    const rejected = records.filter(r => r.condition === 'rejected');
+    const participants = new Set(records.map(r => r.participant_id)).size;
+
+    const avgConf = avg(records.filter(r => r.self_reported_confidence != null), r => r.self_reported_confidence);
+
+    // Summary cards
+    document.getElementById('summary-cards').innerHTML = `
+      <div class="card c-total"><div class="val">${records.length}</div><div class="lbl">Total</div></div>
+      <div class="card c-participants"><div class="val">${participants}</div><div class="lbl">Participants</div></div>
+      <div class="card c-reviewed"><div class="val">${reviewed.length}</div><div class="lbl">Reviewed</div></div>
+      <div class="card c-immediate"><div class="val">${immediate.length}</div><div class="lbl">Immediate</div></div>
+      <div class="card c-rejected"><div class="val">${rejected.length}</div><div class="lbl">Rejected</div></div>
+      <div class="card c-confidence"><div class="val">${avgConf != null ? avgConf.toFixed(1) : '—'}</div><div class="lbl">Avg Confidence</div></div>
+    `;
+
+    // Averages
+    const avgRevDur   = avg(reviewed,  r => r.review_duration_s);
+    const avgPctRev   = avg(reviewed,  r => r.proportion_lines_changed * 100);
+    const avgPctImm   = avg(immediate, r => r.proportion_lines_changed * 100);
+    const avgEditRev  = avg(reviewed,  r => r.total_active_modification_time_s);
+    const avgEditImm  = avg(immediate, r => r.total_active_modification_time_s);
+    const avgTtFirstR = avg(reviewed.filter(r => r.time_to_first_modification_s != null), r => r.time_to_first_modification_s);
+    const avgTtFirstI = avg(immediate.filter(r => r.time_to_first_modification_s != null), r => r.time_to_first_modification_s);
+
+    document.getElementById('avg-grid').innerHTML = `
+      <div class="avg-box">
+        <div class="alabel">Review Duration</div>
+        <div class="avg-row">
+          <span class="aval">${fmt(avgRevDur)}s <span class="atag">reviewed</span></span>
+        </div>
+      </div>
+      <div class="avg-box">
+        <div class="alabel">Lines Changed %</div>
+        <div class="avg-row">
+          <span class="aval">${fmt(avgPctRev)}% <span class="atag">reviewed</span></span>
+          <span class="aval">${fmt(avgPctImm)}% <span class="atag">immediate</span></span>
+        </div>
+      </div>
+      <div class="avg-box">
+        <div class="alabel">Active Edit Time</div>
+        <div class="avg-row">
+          <span class="aval">${fmt(avgEditRev)}s <span class="atag">reviewed</span></span>
+          <span class="aval">${fmt(avgEditImm)}s <span class="atag">immediate</span></span>
+        </div>
+      </div>
+      <div class="avg-box">
+        <div class="alabel">Time to First Edit</div>
+        <div class="avg-row">
+          <span class="aval">${fmt(avgTtFirstR)}s <span class="atag">reviewed</span></span>
+          <span class="aval">${fmt(avgTtFirstI)}s <span class="atag">immediate</span></span>
+        </div>
+      </div>
+    `;
+
+    // Analysis
+    renderAnalysis(records);
+
+    // Table
+    if (records.length === 0) {
+      document.getElementById('table-container').innerHTML = '<div class="empty">No records found.</div>';
+      return;
+    }
+
+    const detailRowHtml = r => `
+      <tr class="${selectedParticipant ? '' : 'p-detail-row'}">
+        <td class="muted">${timeAgo(r.insertion_timestamp / 1000)}</td>
+        <td><strong>${r.participant_id}</strong></td>
+        <td>${r.file_name}</td>
+        <td class="num">${r.original_line_count}</td>
+        <td><span class="badge ${r.condition ?? ''}">${r.condition ?? '—'}</span></td>
+        <td class="num">${r.review_duration_s != null ? r.review_duration_s + 's' : '—'}</td>
+        <td class="num">${stars(r.self_reported_confidence)}</td>
+        <td class="num">${r.proportion_lines_changed != null ? (r.proportion_lines_changed * 100).toFixed(1) + '%' : '—'}</td>
+        <td class="num">${r.total_lines_changed ?? '—'}</td>
+        <td class="num">${r.total_active_modification_time_s != null ? r.total_active_modification_time_s + 's' : '—'}</td>
+        <td class="num">${r.observation_complete ? '✓' : ''}</td>
+      </tr>
+    `;
+
+    const rows = records.map(detailRowHtml).join('');
+
+    document.getElementById('table-container').innerHTML = `
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Participant</th>
+              <th>File</th>
+              <th>Lines</th>
+              <th>Condition</th>
+              <th>Review Time</th>
+              <th>Confidence</th>
+              <th>% Changed</th>
+              <th>Lines Changed</th>
+              <th>Edit Time</th>
+              <th>Done</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  loadData();
+</script>
+</body>
+</html>

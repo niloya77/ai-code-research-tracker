@@ -2,3 +2,8 @@ node_modules/
 out/
 *.vsix
 .vscode-test/
+.claude/
+.DS_Store
+__pycache__/
+*.csv
+participant_table_*.txt

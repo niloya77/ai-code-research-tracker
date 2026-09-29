@@ -6,6 +6,8 @@ import { detectLargeInsertion } from './insertionDetector';
 import { BlockTracker } from './blockTracker';
 import { DataStore } from './dataStore';
 import { SupabaseClient } from './supabaseClient';
+import { BackupStore } from './backupStore';
+import { StatsPanel } from './statsPanel';
 
 function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
@@ -33,6 +35,7 @@ async function askParticipantId(context: vscode.ExtensionContext): Promise<strin
 let tracker: BlockTracker;
 let dataStore: DataStore;
 let supabase: SupabaseClient;
+let backupStore: BackupStore;
 let participantId: string | null = null;
 let statusBarItem: vscode.StatusBarItem;
 let syncStatusItem: vscode.StatusBarItem;
@@ -45,11 +48,30 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   tracker = new BlockTracker();
   dataStore = new DataStore(context);
   supabase = new SupabaseClient();
+  backupStore = new BackupStore(context);
   // Clear stale pendingConfirmation records from previous sessions — they can never be resolved
   const saved = dataStore.load().filter(r => !r.pendingConfirmation);
-  tracker.loadAll(saved);
+  const expiredOnLoad = tracker.loadAll(saved);
 
   participantId = await askParticipantId(context);
+
+  // Sync any records whose 7-day observation window elapsed while the editor was closed
+  if (expiredOnLoad.length > 0) {
+    for (const record of expiredOnLoad) {
+      syncToSupabase(record);
+    }
+    scheduleSave();
+  }
+
+  // Sync records that failed to reach Supabase while offline (lastSynced === null means never synced)
+  const neverSynced = tracker.getAll().filter(r => r.lastSynced === null && r.condition !== null);
+  for (const record of neverSynced) {
+    syncToSupabase(record);
+  }
+  if (neverSynced.length > 0) {
+    console.log(`[AITracker] Startup: retrying ${neverSynced.length} unsynced record(s).`);
+    scheduleSave();
+  }
 
   statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
   statusBarItem.command = 'aiTracker.acceptCode';
@@ -61,7 +83,28 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   context.subscriptions.push(statusBarItem, syncStatusItem);
 
-  // Her 60 saniyede bir bekleyen kayıtları yeniden gönder
+  // Restore an in-progress review interrupted by a restart (e.g. user picked
+  // "Yes, I'll review" but closed the editor before clicking Accept). Without this,
+  // the record stays pendingAcceptance forever and never syncs to Supabase.
+  const orphanedPending = tracker.getAll()
+    .filter(r => r.pendingAcceptance)
+    .sort((a, b) => b.insertionTimestamp - a.insertionTimestamp);
+  if (orphanedPending.length > 0) {
+    const record = orphanedPending[0];
+    pendingRecordId = record.id;
+    if (!record.reviewStartTimestamp) {
+      record.reviewStartTimestamp = Date.now();
+    }
+    startReviewTimer(record.id);
+    statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+    statusBarItem.show();
+    if (orphanedPending.length > 1) {
+      console.warn(`[AITracker] ${orphanedPending.length} orphaned pending-acceptance records found; resuming the most recent, rest remain stuck.`);
+    }
+  }
+
+  // Her 60 saniyede bir bekleyen kayıtları yeniden gönder ve süresi dolan
+  // gözlem pencerelerini kontrol et
   retryInterval = setInterval(async () => {
     if (supabase.hasPending()) {
       const flushed = await supabase.retryPending();
@@ -69,6 +112,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         console.log(`[AITracker] Retry: ${flushed} record(s) synced.`);
         updateSyncStatus(true);
       }
+    }
+
+    const expired = tracker.checkExpiredWindows();
+    if (expired.length > 0) {
+      for (const record of expired) {
+        syncToSupabase(record);
+      }
+      scheduleSave();
     }
   }, 60_000);
 
@@ -79,56 +130,68 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand('aiTracker.setParticipantId', async () => {
       participantId = await askParticipantId(context);
       vscode.window.showInformationMessage(`[AI Tracker] Participant ID set to: ${participantId}`);
-    })
+    }),
+    vscode.commands.registerCommand('aiTracker.pasteIntercept', async () => {
+      const editor = vscode.window.activeTextEditor;
+      const clipboardText = await vscode.env.clipboard.readText();
+
+      if (!clipboardText || clipboardText.replace(/\s/g, '').length === 0 || !editor || pendingRecordId) {
+        await vscode.commands.executeCommand('editor.action.clipboardPasteAction');
+        return;
+      }
+
+      const startLine = editor.selection.active.line;
+      const newlines = (clipboardText.match(/\n/g) ?? []).length;
+      const trailingNewline = clipboardText.endsWith('\n') ? 1 : 0;
+      const lineCount = newlines - trailingNewline + 1;
+      const endLine = startLine + newlines - trailingNewline;
+
+      await vscode.commands.executeCommand('editor.action.clipboardPasteAction');
+
+      const id = generateId();
+      const record: InsertionRecord = {
+        id,
+        insertionTimestamp: Date.now(),
+        fileUri: editor.document.uri.toString(),
+        fileName: path.basename(editor.document.uri.fsPath),
+        originalLineCount: lineCount,
+        startLine,
+        endLine,
+        pendingConfirmation: true,
+        pendingAcceptance: false,
+        editedBeforeAcceptance: false,
+        reviewStartTimestamp: null,
+        reviewDurationMs: null,
+        condition: null,
+        acceptanceTimestamp: null,
+        observationWindowEndTimestamp: null,
+        selfReportedConfidence: null,
+        blockDeleted: false,
+        blockDeletionTimestamp: null,
+        observationComplete: false,
+        lastSynced: null,
+        postAcceptance: {
+          editSessions: [],
+          changedAbsoluteLines: [],
+          totalLinesChanged: 0,
+          proportionLinesChanged: 0,
+          totalActiveModificationTimeMs: 0,
+          timeToFirstModificationMs: null
+        }
+      };
+
+      tracker.add(record);
+      pendingRecordId = id;
+      promptUser(id, lineCount).catch(err => {
+        console.error('[AITracker] promptUser error:', err);
+        tracker.remove(id);
+        pendingRecordId = null;
+      });
+    }),
   );
 
   context.subscriptions.push(
     vscode.workspace.onDidChangeTextDocument(event => {
-      const detected = detectLargeInsertion(event);
-      if (detected && !pendingRecordId) {
-        const id = generateId();
-        const record: InsertionRecord = {
-          id,
-          insertionTimestamp: Date.now(),
-          fileUri: event.document.uri.toString(),
-          fileName: path.basename(event.document.uri.fsPath),
-          originalLineCount: detected.lineCount,
-          commentDensity: detected.commentDensity,
-          startLine: detected.startLine,
-          endLine: detected.endLine,
-          pendingConfirmation: true,
-          pendingAcceptance: false,
-          editedBeforeAcceptance: false,
-          wantsToModify: null,
-          reviewStartTimestamp: null,
-          reviewDurationMs: null,
-          condition: null,
-          acceptanceTimestamp: null,
-          observationWindowEndTimestamp: null,
-          selfReportedConfidence: null,
-          blockDeleted: false,
-          blockDeletionTimestamp: null,
-          observationComplete: false,
-          lastSynced: null,
-          postAcceptance: {
-            editSessions: [],
-            changedAbsoluteLines: [],
-            totalLinesChanged: 0,
-            proportionLinesChanged: 0,
-            changeFrequency: 0,
-            totalActiveModificationTimeMs: 0,
-            timeToFirstModificationMs: null
-          }
-        };
-        tracker.add(record);
-        pendingRecordId = id;
-        promptUser(id, detected.lineCount).catch(err => {
-          console.error('[AITracker] promptUser error:', err);
-          tracker.remove(id);
-          pendingRecordId = null;
-        });
-      }
-
       tracker.handleDocumentChange(
         event,
         record => { scheduleSave(); syncToSupabase(record); },
@@ -150,12 +213,12 @@ async function promptUser(id: string, lineCount: number): Promise<void> {
   );
 
   if (aiAnswer !== 'Yes, AI-generated') {
+    tracker.reject(id);
     const record = tracker.get(id);
     if (record) {
-      record.condition = 'rejected';
       syncToSupabase(record);
+      scheduleSave();
     }
-    tracker.remove(id);
     pendingRecordId = null;
     return;
   }
@@ -174,12 +237,11 @@ async function promptUser(id: string, lineCount: number): Promise<void> {
   );
 
   if (modifyAnswer === 'Yes, I\'ll review') {
-    record.wantsToModify = true;
     record.reviewStartTimestamp = Date.now();
+    record.editedBeforeAcceptance = true;
     startReviewTimer(id);
     statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
   } else {
-    record.wantsToModify = false;
     record.condition = 'immediate';
     record.reviewDurationMs = 0;
     statusBarItem.backgroundColor = undefined;
@@ -257,44 +319,7 @@ async function handleAccept(): Promise<void> {
 }
 
 function showStats(): void {
-  const all = tracker.getAll().filter(r => r.condition !== null);
-
-  if (all.length === 0) {
-    vscode.window.showInformationMessage('[AI Tracker] No accepted blocks recorded yet.');
-    return;
-  }
-
-  const reviewed = all.filter(r => r.condition === 'reviewed');
-  const immediate = all.filter(r => r.condition === 'immediate');
-
-  function avg(arr: InsertionRecord[], fn: (r: InsertionRecord) => number): string {
-    return arr.length
-      ? (arr.reduce((s, r) => s + fn(r), 0) / arr.length).toFixed(3)
-      : 'N/A';
-  }
-
-  const lines = [
-    `Participant: ${participantId}`,
-    `Total accepted blocks: ${all.length}`,
-    `  Reviewed: ${reviewed.length}   Immediate: ${immediate.length}`,
-    ``,
-    `Avg review duration (s):`,
-    `  Reviewed:  ${avg(reviewed, r => (r.reviewDurationMs ?? 0) / 1000)}`,
-    ``,
-    `Proportion lines changed (avg):`,
-    `  Reviewed:  ${avg(reviewed, r => r.postAcceptance.proportionLinesChanged)}`,
-    `  Immediate: ${avg(immediate, r => r.postAcceptance.proportionLinesChanged)}`,
-    ``,
-    `Change frequency (avg):`,
-    `  Reviewed:  ${avg(reviewed, r => r.postAcceptance.changeFrequency)}`,
-    `  Immediate: ${avg(immediate, r => r.postAcceptance.changeFrequency)}`,
-    ``,
-    `Active modification time (s, avg):`,
-    `  Reviewed:  ${avg(reviewed, r => r.postAcceptance.totalActiveModificationTimeMs / 1000)}`,
-    `  Immediate: ${avg(immediate, r => r.postAcceptance.totalActiveModificationTimeMs / 1000)}`
-  ].join('\n');
-
-  vscode.window.showInformationMessage(lines, { modal: true });
+  StatsPanel.show(tracker.getAll(), participantId);
 }
 
 async function exportCSV(): Promise<void> {
@@ -314,6 +339,7 @@ async function exportCSV(): Promise<void> {
 
 function syncToSupabase(record: InsertionRecord): void {
   if (!participantId) return;
+  backupStore.append(record, participantId);
   supabase.sync(record, participantId)
     .then(ok => {
       if (ok) {

@@ -8,4 +8,5 @@
       variance = sum((x - mean) ** 2 for x in veri) / count
       std_dev = variance ** 0.5 
       return {"mean": mean, "median": median, "std_dev": std_dev}
+    
   
