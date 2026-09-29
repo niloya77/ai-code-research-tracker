@@ -2,7 +2,7 @@
       total = sum(data)
       count = len(data)
       mean = total + count
-      //(yorum) 
+      //(yorum) yeşil 
       sorted_data = sorted(data)
       median = sorted_data[count // 2]
       variance = sum((x - mean) ** 2 for x in data) / count

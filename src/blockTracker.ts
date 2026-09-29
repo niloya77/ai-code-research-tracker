@@ -25,20 +25,37 @@ export class BlockTracker {
     this.records.delete(id);
   }
 
-  loadAll(records: InsertionRecord[]): void {
+  // Returns records whose observation window just elapsed (need re-sync to Supabase)
+  loadAll(records: InsertionRecord[]): InsertionRecord[] {
     this.records.clear();
     const now = Date.now();
+    const newlyCompleted: InsertionRecord[] = [];
     for (const r of records) {
       // Migrate records saved before these fields existed
       r.observationComplete = r.observationComplete ??
         (r.observationWindowEndTimestamp ? now > r.observationWindowEndTimestamp : false);
       r.lastSynced = r.lastSynced ?? null;
       // Mark complete if window already elapsed
-      if (r.observationWindowEndTimestamp && now > r.observationWindowEndTimestamp) {
+      if (!r.observationComplete && r.observationWindowEndTimestamp && now > r.observationWindowEndTimestamp) {
         r.observationComplete = true;
+        newlyCompleted.push(r);
       }
       this.records.set(r.id, r);
     }
+    return newlyCompleted;
+  }
+
+  // Returns records whose observation window has elapsed since the last check
+  checkExpiredWindows(): InsertionRecord[] {
+    const now = Date.now();
+    const newlyCompleted: InsertionRecord[] = [];
+    for (const r of this.records.values()) {
+      if (!r.observationComplete && r.observationWindowEndTimestamp && now > r.observationWindowEndTimestamp) {
+        r.observationComplete = true;
+        newlyCompleted.push(r);
+      }
+    }
+    return newlyCompleted;
   }
 
   handleDocumentChange(
@@ -58,8 +75,36 @@ export class BlockTracker {
         continue;
       }
 
+      // Record pre-change positions to check if changes touched this block
+      const preStartLine = record.startLine;
+      const preEndLine = record.endLine;
+      let touchedBlock = false;
+
       for (const change of event.contentChanges) {
+        const cs = change.range.start.line;
+        const ce = change.range.end.line;
+        if (!(ce < preStartLine || cs > preEndLine)) {
+          touchedBlock = true;
+        }
         this.processChange(record, change, now, onModification, onDeletion);
+      }
+
+      // Only if a change actually overlapped this block: check if all lines are now blank/gone
+      if (touchedBlock && !record.blockDeleted && record.acceptanceTimestamp && !record.pendingAcceptance) {
+        const doc = event.document;
+        const checkEnd = Math.min(record.endLine, record.startLine + record.originalLineCount - 1);
+        let allBlank = true;
+        for (let l = record.startLine; l <= checkEnd; l++) {
+          if (l < doc.lineCount && doc.lineAt(l).text.trim().length > 0) {
+            allBlank = false;
+            break;
+          }
+        }
+        if (allBlank) {
+          record.blockDeleted = true;
+          record.blockDeletionTimestamp = now;
+          onDeletion?.(record);
+        }
       }
     }
   }
@@ -89,8 +134,11 @@ export class BlockTracker {
     if (isBelow) return;
 
     // Detect full block deletion before clamping
+    // Use original footprint to avoid false negatives when endLine grew due to nested pastes
+    const effectiveEndLine = Math.min(record.endLine, record.startLine + record.originalLineCount - 1);
     const newEndLine = record.endLine + lineDelta;
-    if (newEndLine < record.startLine && !record.blockDeleted && record.acceptanceTimestamp) {
+    const blockFullyCovered = change.text === '' && changeStart <= record.startLine && changeEnd >= effectiveEndLine;
+    if ((newEndLine < record.startLine || blockFullyCovered) && !record.blockDeleted && record.acceptanceTimestamp) {
       record.blockDeleted = true;
       record.blockDeletionTimestamp = now;
       onDeletion?.(record);
@@ -147,8 +195,6 @@ export class BlockTracker {
       }
     }
 
-    data.changeFrequency++;
-
     // Track edit sessions (consecutive edits within IDLE_THRESHOLD belong to same session)
     const lastSession = data.editSessions[data.editSessions.length - 1];
     if (lastSession && now - lastSession.lastEditTimestamp < IDLE_THRESHOLD_MS) {
@@ -184,6 +230,17 @@ export class BlockTracker {
     record.observationWindowEndTimestamp = now + OBSERVATION_WINDOW_MS;
     record.observationComplete = false;
     record.pendingAcceptance = false;
+  }
+
+  reject(id: string): void {
+    const record = this.records.get(id);
+    if (!record) return;
+
+    record.condition = 'rejected';
+    record.pendingConfirmation = false;
+    record.pendingAcceptance = false;
+    // 7-day window from insertion so checkExpiredWindows() can close it automatically
+    record.observationWindowEndTimestamp = record.insertionTimestamp + OBSERVATION_WINDOW_MS;
   }
 
   confirmAI(id: string): void {

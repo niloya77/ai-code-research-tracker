@@ -46,6 +46,18 @@
       {
         "command": "aiTracker.setParticipantId",
         "title": "AI Tracker: Set Participant ID"
+      },
+      {
+        "command": "aiTracker.pasteIntercept",
+        "title": "AI Tracker: Paste (internal)"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "aiTracker.pasteIntercept",
+        "key": "ctrl+v",
+        "mac": "cmd+v",
+        "when": "editorTextFocus"
       }
     ]
   },
