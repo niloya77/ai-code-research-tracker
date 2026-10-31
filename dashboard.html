@@ -378,7 +378,7 @@
   const { createClient } = supabase;
   const db = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-  const EXCLUDED_PARTICIPANTS = new Set(['ss']);
+  const EXCLUDED_PARTICIPANTS = new Set(['ss', '55']);
 
   let allRecords = [];
   let selectedParticipant = null;
@@ -554,9 +554,29 @@
     </div>`;
   }
 
+  function geeBoxFromAPI(g) {
+    if (!g || g.error) {
+      return `<div class="analysis-box"><h3>Thesis Models (GEE)</h3>
+        <div class="stat-row"><span class="skey">Result</span><span class="sval sig-unknown">${g ? g.error : 'not available'}</span></div></div>`;
+    }
+    const row = (label, m, name) => {
+      if (!m || m.error) return `<div class="stat-row"><span class="skey">${label}</span><span class="sval sig-unknown">${m ? m.error : '—'}</span></div>`;
+      return `<div class="stat-row"><span class="skey">${label}</span><span class="sval">${name} ${m[name]} [${m.ci_low}, ${m.ci_high}], p=${m.p} <span class="${m.significant ? 'sig-yes' : 'sig-no'}">${m.significant ? '✓' : '✗'}</span></span></div>`;
+    };
+    return `<div class="analysis-box">
+      <h3>Thesis Models (GEE)</h3>
+      <div class="rq-label">All blocks, grouped by participant (${g.n_blocks} blocks, ${g.n_participants} participants)</div>
+      ${row('RQ1 — lines changed (binomial)', g.rq1_lines, 'OR')}
+      ${row('Block changed at all (logistic)', g.changed_at_all, 'OR')}
+      ${row('RQ2 — modification time (Tweedie)', g.rq2_time, 'ratio')}
+    </div>`;
+  }
+
   function renderAnalysisFromAPI(d, records) {
     const ex = d.exploratory || {};
     const f  = v => v != null ? v : '—';
+    const ca = d.changed_at_all || {};
+    const caRow = (label, c) => c ? `<div class="stat-row"><span class="skey">${label}</span><span class="sval">${c.pct ?? '—'}% (${c.n} / ${c.of})</span></div>` : '';
 
     // Per-participant table (still computed from raw records)
     const buckets = {};
@@ -583,6 +603,13 @@
         </div>
         ${rqBoxFromAPI(d.rq1, 'RQ1', 'Proportion of lines changed after acceptance')}
         ${rqBoxFromAPI(d.rq2, 'RQ2', 'Total active modification time after acceptance (s)')}
+        ${geeBoxFromAPI(d.gee)}
+        <div class="analysis-box">
+          <h3>Blocks Changed at All</h3>
+          <div class="rq-label">Share of blocks with at least one changed line after acceptance</div>
+          ${caRow('Reviewed', ca.reviewed)}
+          ${caRow('Immediate', ca.immediate)}
+        </div>
         <div class="analysis-box">
           <h3>Exploratory Measures</h3>
           <div class="stat-row"><span class="skey">Confidence reviewed</span><span class="sval">${f(ex.confidence_reviewed)}</span></div>
@@ -723,8 +750,18 @@
     const avgEditImm  = avg(immediate, r => r.total_active_modification_time_s);
     const avgTtFirstR = avg(reviewed.filter(r => r.time_to_first_modification_s != null), r => r.time_to_first_modification_s);
     const avgTtFirstI = avg(immediate.filter(r => r.time_to_first_modification_s != null), r => r.time_to_first_modification_s);
+    // Share of blocks changed at all after acceptance
+    const changedCount = arr => arr.filter(r => (r.total_lines_changed ?? 0) > 0).length;
+    const changedPct = arr => arr.length ? changedCount(arr) / arr.length * 100 : null;
 
     document.getElementById('avg-grid').innerHTML = `
+      <div class="avg-box">
+        <div class="alabel">Blocks Changed at All</div>
+        <div class="avg-row">
+          <span class="aval">${fmt(changedPct(reviewed), 1)}% <span class="atag">reviewed (${changedCount(reviewed)}/${reviewed.length})</span></span>
+          <span class="aval">${fmt(changedPct(immediate), 1)}% <span class="atag">immediate (${changedCount(immediate)}/${immediate.length})</span></span>
+        </div>
+      </div>
       <div class="avg-box">
         <div class="alabel">Review Duration</div>
         <div class="avg-row">
@@ -767,7 +804,6 @@
       <tr class="${selectedParticipant ? '' : 'p-detail-row'}">
         <td class="muted">${timeAgo(r.insertion_timestamp / 1000)}</td>
         <td><strong>${r.participant_id}</strong></td>
-        <td>${r.file_name}</td>
         <td class="num">${r.original_line_count}</td>
         <td><span class="badge ${r.condition ?? ''}">${r.condition ?? '—'}</span></td>
         <td class="num">${r.review_duration_s != null ? r.review_duration_s + 's' : '—'}</td>
@@ -788,7 +824,6 @@
             <tr>
               <th>Time</th>
               <th>Participant</th>
-              <th>File</th>
               <th>Lines</th>
               <th>Condition</th>
               <th>Review Time</th>

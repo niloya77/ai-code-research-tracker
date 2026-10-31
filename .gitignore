@@ -7,3 +7,12 @@ out/
 __pycache__/
 *.csv
 participant_table_*.txt
+
+# Analysis scripts (local only)
+analysis.py
+extended_analysis.py
+hipotez_table.py
+participant_medians.py
+participant_table.py
+plot_*.py
+server.py
